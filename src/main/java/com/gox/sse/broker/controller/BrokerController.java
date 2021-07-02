@@ -1,6 +1,7 @@
 package com.gox.sse.broker.controller;
 
 import com.gox.sse.broker.client.SseClient;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
@@ -51,12 +52,9 @@ public class BrokerController {
 
 @Getter
 @Setter
-@Data
+@AllArgsConstructor
 class Msg {
     public String topic;
     public LocalTime date;
     public String payload;
-
-    public Msg(String heartbeat, LocalTime now, String heartbeat1) {
-    }
 }

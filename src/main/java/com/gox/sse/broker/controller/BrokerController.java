@@ -1,14 +1,10 @@
 package com.gox.sse.broker.controller;
 
-import com.gox.sse.broker.client.SseClient;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.Getter;
-import lombok.Setter;
+import com.gox.sse.broker.dto.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
@@ -16,6 +12,7 @@ import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
 import java.time.LocalTime;
+import java.util.HashMap;
 
 @RestController
 public class BrokerController {
@@ -24,23 +21,21 @@ public class BrokerController {
 
     final Sinks.Many sink;
 
+    private HashMap<String, Sinks.Many> topicSinks;
+
     public BrokerController() {
         this.sink = Sinks.many().multicast().onBackpressureBuffer();
     }
 
     @GetMapping("/send")
     public void test() {
-        Sinks.EmitResult result = sink.tryEmitNext(new Msg("kek", LocalTime.now(), "Hello"));
-        if (result.isFailure()) {
-            // do something here, since emission failed
-        }
+        Sinks.EmitResult result = sink.tryEmitNext(new Message("events", LocalTime.now(), "Hello"));
     }
 
-    @GetMapping(path = "/heartbeat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<Msg> streamFlux() {
-        log.info("GET /heartbeat");
-        return Flux.interval(Duration.ofSeconds(1))
-                .map(sequence -> new Msg("heartbeat", LocalTime.now(), "Heartbeat"));
+    @Scheduled(fixedRate = 2000)
+    public void heartbeat() {
+        log.info("heartbeat");
+        sink.tryEmitNext(new Message("heartbeat", LocalTime.now(), "Heartbeat"));
     }
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -50,11 +45,3 @@ public class BrokerController {
     }
 }
 
-@Getter
-@Setter
-@AllArgsConstructor
-class Msg {
-    public String topic;
-    public LocalTime date;
-    public String payload;
-}

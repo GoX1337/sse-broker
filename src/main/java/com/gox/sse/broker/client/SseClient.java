@@ -5,9 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fasterxml.jackson.module.paramnames.ParameterNamesModule;
-import lombok.Data;
-import lombok.Getter;
-import lombok.Setter;
+import com.gox.sse.broker.dto.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,19 +13,23 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.LocalTime;
+import java.util.*;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 public class SseClient {
 
     private static Logger log = LoggerFactory.getLogger(SseClient.class);
 
-    private String brokerEndpoint;
     private HttpClient client;
     private ObjectMapper mapper;
+    private String brokerEndpoint;
+    private Map<String, Consumer<Message>> messageHandlers;
+    private List<String> topics;
+    private UUID id = UUID.randomUUID();
 
-    public SseClient() {
+    public SseClient(String brokerEndpoint, Map<String, Consumer<Message>> messageHandlers) {
+        this.brokerEndpoint = brokerEndpoint;
+        this.messageHandlers = messageHandlers;
         this.client = HttpClient.newBuilder().build();
         this.mapper = new ObjectMapper()
                 .registerModule(new ParameterNamesModule())
@@ -35,50 +37,81 @@ public class SseClient {
                 .registerModule(new JavaTimeModule());
     }
 
-    public void connect(String brokerEndpoint){
-        this.brokerEndpoint = brokerEndpoint;
+    public static class Builder {
+
+        private String brokerEndpoint;
+        private Map<String, Consumer<Message>> messageHandlers = new HashMap<>();
+        private List<String> topics = new ArrayList<>();
+
+        public Builder endpoint(String brokerEndpoint){
+            this.brokerEndpoint = brokerEndpoint;
+            return this;
+        }
+
+        public Builder messageHandler(String topic, Consumer<Message> handler){
+            topics.add(topic);
+            messageHandlers.put(topic, handler);
+            return this;
+        }
+
+        public SseClient build(){
+            return new SseClient(this.brokerEndpoint, this.messageHandlers);
+        }
     }
 
     public Message buildMessageFromJson(String jsonPayload) {
         try {
-            return mapper.readValue(jsonPayload.replace("data:", ""), Message.class);
+            Message msg = mapper.readValue(jsonPayload.replace("data:", ""), Message.class);
+            msg.setClientId(this.id);
+            return msg;
         } catch (JsonProcessingException e) {
             return null;
         }
     }
 
-    public void subscribe(String topic, Consumer<Message> consumer){
+    private void start() {
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(new URI(brokerEndpoint + "/" + topic))
+                    .uri(new URI(brokerEndpoint + "/events"))
                     .build();
+
             client.send(request, HttpResponse.BodyHandlers.ofLines())
                     .body()
                     .filter(s -> !s.isEmpty())
                     .map(this::buildMessageFromJson)
-                    .forEach(consumer);
+                    .forEach(message -> {
+                        Consumer<Message> messageHandler = this.messageHandlers.get(message.getTopic());
+                        if(messageHandler != null){
+                            messageHandler.accept(message);
+                        } else {
+                            log.error("No message handler for topic {}", message.getTopic());
+                        }
+                    });
         } catch (Exception e){
             e.printStackTrace();
         }
     }
 
     public static void main(String[] args) {
-        SseClient sseClient = new SseClient();
-        sseClient.connect("http://localhost:8080");
+        new Thread(() -> {
+            SseClient sseClient = new SseClient.Builder()
+                    .endpoint("http://localhost:8080")
+                    .messageHandler("heartbeat", message -> {
+                        System.out.println("/heartbeat : " + message);
+                    })
+                    .messageHandler("events", message -> {
+                        System.out.println("/event : " + message);
+                    })
+                    .build();
+            sseClient.start();
+        }).start();
 
-        sseClient.subscribe("heartbeat", message -> {
-            System.out.println(message);
-        });
-
+        SseClient sseClient = new SseClient.Builder()
+                .endpoint("http://localhost:8080")
+                .messageHandler("heartbeat", message -> {
+                    System.out.println("/heartbeat : " + message);
+                })
+                .build();
+        sseClient.start();
     }
-}
-
-@Getter
-@Setter
-@Data
-class Message {
-    public String topic;
-    public LocalTime date;
-    public String payload;
-
 }

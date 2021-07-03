@@ -28,7 +28,6 @@ public class SseClient {
     private Map<String, Consumer<Message>> messageHandlers;
     private List<String> topics;
     private UUID id = UUID.randomUUID();
-    private boolean isConnected = false;
 
     public SseClient(String brokerEndpoint, List<String> topics, Map<String, Consumer<Message>> messageHandlers) {
         this.brokerEndpoint = brokerEndpoint;
@@ -85,7 +84,6 @@ public class SseClient {
                 .filter(s -> !s.isEmpty())
                 .map(this::buildMessageFromJson)
                 .forEach(message -> {
-                    this.isConnected = true;
                     Consumer<Message> messageHandler = this.messageHandlers.get(message.getTopic());
                     if(messageHandler != null){
                         messageHandler.accept(message);
@@ -100,7 +98,6 @@ public class SseClient {
             sseRequestEvents();
         } catch (IOException ioe){
             log.error("Disconnected. Trying to reconnect after 2s");
-            this.isConnected = false;
             try {
                 Thread.sleep(2000);
             } catch (InterruptedException e) {

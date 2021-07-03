@@ -20,6 +20,7 @@ public class BrokerController {
     private static Logger log = LoggerFactory.getLogger(BrokerController.class);
 
     private Map<String, List<Sinks.Many>> topicSinks = new HashMap<>();
+    private Map<String, List<String>> topics = new HashMap<>();
 
     @GetMapping("/send")
     public void test() {
@@ -40,6 +41,11 @@ public class BrokerController {
         }
     }
 
+    @GetMapping(value = "/topics", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map topics(HttpServletRequest request) {
+        return this.topics;
+    }
+
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> events(HttpServletRequest request) {
         String clientId = request.getHeader("clientId");
@@ -49,6 +55,13 @@ public class BrokerController {
         Sinks.Many sink = Sinks.many().multicast().onBackpressureBuffer();
 
         for(String topic: topics){
+            List<String> clients = this.topics.get(topic);
+            if(clients == null){
+                clients = new ArrayList<>();
+            }
+            clients.add(clientId);
+            this.topics.put(topic, clients);
+
             List<Sinks.Many> sinks = this.topicSinks.get(topic);
             if(sinks == null){
                 sinks = new ArrayList<>();

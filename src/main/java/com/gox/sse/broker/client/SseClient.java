@@ -9,7 +9,9 @@ import com.gox.sse.broker.dto.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -27,9 +29,10 @@ public class SseClient {
     private List<String> topics;
     private UUID id = UUID.randomUUID();
 
-    public SseClient(String brokerEndpoint, Map<String, Consumer<Message>> messageHandlers) {
+    public SseClient(String brokerEndpoint, List<String> topics, Map<String, Consumer<Message>> messageHandlers) {
         this.brokerEndpoint = brokerEndpoint;
         this.messageHandlers = messageHandlers;
+        this.topics = topics;
         this.client = HttpClient.newBuilder().build();
         this.mapper = new ObjectMapper()
                 .registerModule(new ParameterNamesModule())
@@ -55,7 +58,7 @@ public class SseClient {
         }
 
         public SseClient build(){
-            return new SseClient(this.brokerEndpoint, this.messageHandlers);
+            return new SseClient(this.brokerEndpoint, this.topics, this.messageHandlers);
         }
     }
 
@@ -69,25 +72,31 @@ public class SseClient {
         }
     }
 
+    private void sseRequestEvents() throws URISyntaxException, IOException, InterruptedException {
+        HttpRequest sseRequest = HttpRequest.newBuilder()
+                .uri(new URI(brokerEndpoint + "/events"))
+                .header("clientId", this.id.toString())
+                .header("topics", String.join(",", this.topics))
+                .build();
+
+        client.send(sseRequest, HttpResponse.BodyHandlers.ofLines())
+                .body()
+                .filter(s -> !s.isEmpty())
+                .map(this::buildMessageFromJson)
+                .forEach(message -> {
+                    Consumer<Message> messageHandler = this.messageHandlers.get(message.getTopic());
+                    if(messageHandler != null){
+                        messageHandler.accept(message);
+                    } else {
+                        log.error("No message handler for topic {}", message.getTopic());
+                    }
+                });
+    }
+
     private void start() {
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(new URI(brokerEndpoint + "/events"))
-                    .build();
-
-            client.send(request, HttpResponse.BodyHandlers.ofLines())
-                    .body()
-                    .filter(s -> !s.isEmpty())
-                    .map(this::buildMessageFromJson)
-                    .forEach(message -> {
-                        Consumer<Message> messageHandler = this.messageHandlers.get(message.getTopic());
-                        if(messageHandler != null){
-                            messageHandler.accept(message);
-                        } else {
-                            log.error("No message handler for topic {}", message.getTopic());
-                        }
-                    });
-        } catch (Exception e){
+            sseRequestEvents();
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
